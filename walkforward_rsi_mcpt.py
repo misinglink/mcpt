@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 from bar_permute import get_permutation
 from donchian import  walkforward_donch
+from rsi import walkforward_rsi
 
 client = MongoClient("mongodb://localhost:37017/")
 db = client["BTC_data"]
@@ -18,14 +19,14 @@ start_day_ms = int(start_day_s.timestamp() * 100)  # assuming 't' is in ms
 # Load all documents from the collection into a DataFrame
 df = pd.DataFrame(list(collection.find({"t": {"$gte": start_day_ms}})))
 print(f"Amount of data {len(df)} minutes.")
-df['r'] = np.log(df['close']).diff().shift(-1)
+df['r'] = np.log(df['c']).diff().shift(-1)
 
-train_window = len(df)
+train_window = len(df) - (60 * 5)
 
-df['donch_wf_signal'] = walkforward_donch(df, train_lookback=train_window)
+df['rsi_wf_signal'] = walkforward_donch(df, train_lookback=train_window)
 
-donch_rets = df['donch_wf_signal'] * df['r']
-real_wf_pf = donch_rets[donch_rets > 0].sum() / donch_rets[donch_rets < 0].abs().sum()
+rsi_rets = df['rsi_wf_signal'] * df['r']
+real_wf_pf = rsi_rets[rsi_rets > 0].sum() / rsi_rets[rsi_rets < 0].abs().sum()
 
 n_permutations = 200
 perm_better_count = 1
@@ -34,8 +35,8 @@ print("Walkforward MCPT")
 for perm_i in tqdm(range(1, n_permutations)):
     wf_perm = get_permutation(df, start_index=train_window)
     
-    wf_perm['r'] = np.log(wf_perm['close']).diff().shift(-1) 
-    wf_perm_sig = walkforward_donch(wf_perm, train_lookback=train_window)
+    wf_perm['r'] = np.log(wf_perm['c']).diff().shift(-1) 
+    wf_perm_sig = walkforward_rsi(wf_perm, train_lookback=train_window)
     perm_rets = wf_perm['r'] * wf_perm_sig
     perm_pf = perm_rets[perm_rets > 0].sum() / perm_rets[perm_rets < 0].abs().sum()
     

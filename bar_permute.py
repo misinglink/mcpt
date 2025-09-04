@@ -2,6 +2,9 @@ import numpy as np
 import pandas as pd
 from typing import List, Union
 
+from pymongo import MongoClient
+import matplotlib.pyplot as plt
+
 def get_permutation(
     ohlc: Union[pd.DataFrame, List[pd.DataFrame]], start_index: int = 0, seed=None
 ):
@@ -18,11 +21,13 @@ def get_permutation(
         n_markets = 1
         time_index = ohlc.index
         ohlc = [ohlc]
-
+    
     n_bars = len(ohlc[0])
+
 
     perm_index = start_index + 1
     perm_n = n_bars - perm_index
+
 
     start_bar = np.empty((n_markets, 4))
     relative_open = np.empty((n_markets, perm_n))
@@ -31,18 +36,18 @@ def get_permutation(
     relative_close = np.empty((n_markets, perm_n))
 
     for mkt_i, reg_bars in enumerate(ohlc):
-        log_bars = np.log(reg_bars[['open', 'high', 'low', 'close']])
+        log_bars = np.log(reg_bars[['o', 'h', 'l', 'c']])
 
         # Get start bar
         start_bar[mkt_i] = log_bars.iloc[start_index].to_numpy()
 
         # Open relative to last close
-        r_o = (log_bars['open'] - log_bars['close'].shift()).to_numpy()
+        r_o = (log_bars['o'] - log_bars['c'].shift()).to_numpy()
         
         # Get prices relative to this bars open
-        r_h = (log_bars['high'] - log_bars['open']).to_numpy()
-        r_l = (log_bars['low'] - log_bars['open']).to_numpy()
-        r_c = (log_bars['close'] - log_bars['open']).to_numpy()
+        r_h = (log_bars['h'] - log_bars['o']).to_numpy()
+        r_l = (log_bars['l'] - log_bars['o']).to_numpy()
+        r_c = (log_bars['c'] - log_bars['o']).to_numpy()
 
         relative_open[mkt_i] = r_o[perm_index:]
         relative_high[mkt_i] = r_h[perm_index:]
@@ -67,7 +72,7 @@ def get_permutation(
         perm_bars = np.zeros((n_bars, 4))
 
         # Copy over real data before start index 
-        log_bars = np.log(reg_bars[['open', 'high', 'low', 'close']]).to_numpy().copy()
+        log_bars = np.log(reg_bars[['o', 'h', 'l', 'c']]).to_numpy().copy()
         perm_bars[:start_index] = log_bars[:start_index]
         
         # Copy start bar
@@ -81,7 +86,7 @@ def get_permutation(
             perm_bars[i, 3] = perm_bars[i, 0] + relative_close[mkt_i][k]
 
         perm_bars = np.exp(perm_bars)
-        perm_bars = pd.DataFrame(perm_bars, index=time_index, columns=['open', 'high', 'low', 'close'])
+        perm_bars = pd.DataFrame(perm_bars, index=time_index, columns=['o', 'h', 'l', 'c'])
 
         perm_ohlc.append(perm_bars)
 
@@ -91,53 +96,66 @@ def get_permutation(
         return perm_ohlc[0]
 
 if __name__ == '__main__':
+    COIN = "TRUMP"
     
-    import matplotlib.pyplot as plt
+    client = MongoClient("mongodb://localhost:37017/")
+    db = client[F"{COIN}_data"]
+    collection = db["candles_1m"]
+
+    # Load all documents from the collection into a DataFrame
+    real_df = pd.DataFrame(list(collection.find()))
+
+    perm_df = get_permutation(real_df)
+    real_r = np.log(real_df['c']).diff() 
+    perm_r = np.log(perm_df['c']).diff()
+
+    print(f"Mean. REAL: {real_r.mean():14.6f} PERM: {perm_r.mean():14.6f}")
+    print(f"Stdd. REAL: {real_r.std():14.6f} PERM: {perm_r.std():14.6f}")
+    print(f"Skew. REAL: {real_r.skew():14.6f} PERM: {perm_r.skew():14.6f}")
+    print(f"Kurt. REAL: {real_r.kurt():14.6f} PERM: {perm_r.kurt():14.6f}")
+
+    # eth_real = pd.read_csv('data/HYPE_price_history_coinlore.csv')
+    # eth_real.index = eth_real.index.astype('datetime64[s]')
+    # eth_real = eth_real[(eth_real.index.year >= 2018) & (eth_real.index.year < 2020)]
+    # eth_real_r = np.log(eth_real['close']).diff()
     
-    btc_real = pd.read_parquet('BTCUSD3600.pq')
-    btc_real.index = btc_real.index.astype('datetime64[s]')
-    btc_real = btc_real[(btc_real.index.year >= 2018) & (btc_real.index.year < 2020)]
+    # # print("") 
 
-    btc_perm = get_permutation(btc_real)
+    # permed = get_permutation([btc_real, eth_real])
+    # btc_perm = permed[0]
+    # eth_perm = permed[1]
 
-    btc_real_r = np.log(btc_real['close']).diff() 
-    btc_perm_r = np.log(btc_perm['close']).diff()
+    # perm_profit = perm_log_close.cumsum()
 
-    print(f"Mean. REAL: {btc_real_r.mean():14.6f} PERM: {btc_perm_r.mean():14.6f}")
-    print(f"Stdd. REAL: {btc_real_r.std():14.6f} PERM: {btc_perm_r.std():14.6f}")
-    print(f"Skew. REAL: {btc_real_r.skew():14.6f} PERM: {btc_perm_r.skew():14.6f}")
-    print(f"Kurt. REAL: {btc_real_r.kurt():14.6f} PERM: {btc_perm_r.kurt():14.6f}")
-
-    eth_real = pd.read_parquet('ETHUSD3600.pq')
-    eth_real.index = eth_real.index.astype('datetime64[s]')
-    eth_real = eth_real[(eth_real.index.year >= 2018) & (eth_real.index.year < 2020)]
-    eth_real_r = np.log(eth_real['close']).diff()
-    
-    print("") 
-
-    permed = get_permutation([btc_real, eth_real])
-    btc_perm = permed[0]
-    eth_perm = permed[1]
-    
-    btc_perm_r = np.log(btc_perm['close']).diff()
-    eth_perm_r = np.log(eth_perm['close']).diff()
-    print(f"BTC&ETH Correlation REAL: {btc_real_r.corr(eth_real_r):5.3f} PERM: {btc_perm_r.corr(eth_perm_r):5.3f}")
+    # eth_perm_r = np.log(eth_perm['close']).diff()
+    # print(f"BTC&ETH Correlation REAL:/ {btc_real_r.corr(eth_real_r):5.3f} PERM: {btc_perm_r.corr(eth_perm_r):5.3f}")
 
     plt.style.use("dark_background")    
-    np.log(btc_real['close']).diff().cumsum().plot(color='orange', label='BTCUSD')
-    np.log(eth_real['close']).diff().cumsum().plot(color='purple', label='ETHUSD')
+    np.log(real_df['c']).diff().cumsum().plot(color='blue', label=f'{COIN}USD')
+    np.log(perm_df['c']).diff() .cumsum().plot(color='gray', label=f'{COIN}USD')
+    # np.log(eth_perm['close']).diff().cumsum().plot(color='purple', label='ETHUSD')
+    plt.title(f"{COIN} permuted data vs real log data LOG return")
+    plt.ylabel("Cumulative Log Return")
+    plt.legend()
+    plt.show()
+
+
+
+########## REAL PRICES #########
+    plt.style.use("dark_background")    
+    real_df["c"].plot(color='blue', label=f'{COIN}USD')
+    # np.log(eth_real['close']).diff().cumsum().plot(color='purple', label='ETHUSD')
     
-    plt.ylabel("Cumulative Log Return")
-    plt.title("Real BTCUSD and ETHUSD")
+    # plt.ylabel("Cumulative Log Return")
+    # plt.title("Real HYPEUSD")
+    # plt.legend()
+    # plt.show()
+
+    perm_df["c"].plot(color='gray', label=f'{COIN}USD')
+    # np.log(eth_perm['close']).diff().cumsum().plot(color='purple', label='ETHUSD')
+    plt.title(f"{COIN} permuted prices vs real log data")
+    plt.ylabel("Price")
     plt.legend()
     plt.show()
-
-    np.log(btc_perm['close']).diff().cumsum().plot(color='orange', label='BTCUSD')
-    np.log(eth_perm['close']).diff().cumsum().plot(color='purple', label='ETHUSD')
-    plt.title("Permuted BTCUSD and ETHUSD")
-    plt.ylabel("Cumulative Log Return")
-    plt.legend()
-    plt.show()
-
 
 
